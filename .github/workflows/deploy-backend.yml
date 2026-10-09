@@ -28,6 +28,7 @@ jobs:
           fi
 
      
+      
       - name: Install SSH key
         env:
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
@@ -40,8 +41,26 @@ jobs:
           printf '%s\n' "$EC2_SSH_KEY" | tr -d '\r' > ~/.ssh/ec2_key
           chmod 600 ~/.ssh/ec2_key
 
-          ssh-keygen -y -f ~/.ssh/ec2_key > /dev/null
-          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+          echo "Checking whether the SSH key is present..."
+          test -s ~/.ssh/ec2_key || {
+            echo "ERROR: EC2_SSH_KEY is empty or missing."
+            exit 1
+          }
+
+          echo "Checking private key format..."
+          if ! ssh-keygen -y -f ~/.ssh/ec2_key > /dev/null; then
+            echo "ERROR: The private key could not be parsed."
+            exit 1
+          fi
+
+          echo "Checking EC2 host..."
+          if ! ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null; then
+            echo "ERROR: Could not scan the EC2 host on SSH port 22."
+            exit 1
+          fi
+
+          echo "SSH key and host checks passed."
+
 
 
       - name: Deploy to EC2
