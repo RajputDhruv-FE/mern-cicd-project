@@ -1,0 +1,74 @@
+
+name: Deploy Backend to EC2
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy (full commit SHA)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy selected image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate image tag
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          if ! [[ "$IMAGE_TAG" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "Error: enter the full 40-character Git commit SHA tag."
+            exit 1
+          fi
+
+      - name: Install SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keygen -y -f ~/.ssh/ec2_key > /dev/null
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          printf '%s' "$DOCKERHUB_TOKEN" | ssh -i ~/.ssh/ec2_key ubuntu@"$EC2_HOST" \
+            "sudo docker login -u '$DOCKERHUB_USERNAME' --password-stdin"
+
+          ssh -i ~/.ssh/ec2_key ubuntu@"$EC2_HOST" \
+            "sudo docker pull dhruvddu/mern-backend:$IMAGE_TAG"
+
+          ssh -i ~/.ssh/ec2_key ubuntu@"$EC2_HOST" \
+            "sudo docker rm -f mern-backend 2>/dev/null || true"
+
+          ssh -i ~/.ssh/ec2_key ubuntu@"$EC2_HOST" \
+            "sudo docker run -d --name mern-backend -p 5000:5000 --restart unless-stopped dhruvddu/mern-backend:$IMAGE_TAG"
+
+      - name: Verify deployment
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error \
+              "http://$EC2_HOST:5000/" ; then
+              echo
+              echo "Deployment health check passed."
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "Health check failed."
+          exit 1
