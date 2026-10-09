@@ -22,6 +22,12 @@ app.get("/api/products", (req, res) => {
   res.json(products);
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Start the server only when this file is run directly.
+if (require.main === module) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+// Export the app so automated tests can use it.
+module.exports = app;
